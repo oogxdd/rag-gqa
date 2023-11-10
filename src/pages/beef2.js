@@ -1,32 +1,9 @@
 import { useState, useEffect } from "react";
-import { createEmbedding } from "@/utils";
-import { createQAEmbedding, generateUniqueId } from "@/utils";
 import axios from "axios";
-import { Pinecone } from "@pinecone-database/pinecone";
-import ExistingQA from "@/components/existing-qa";
-
-import { Button, Input, Checkbox, Box } from "@/components/ui";
-import { useMutation, gql } from "@apollo/client";
-
-const pinecone = new Pinecone({
-  environment: "gcp-starter",
-  apiKey: "3bacdd76-4962-4cdb-8441-5792a0e2c37e",
-});
-
-const ADD_PAIR_MUTATION = gql`
-  mutation AddPair($question: String!, $answer: String!) {
-    insert_pairs_one(object: { question: $question, answer: $answer }) {
-      id
-    }
-  }
-`;
 
 export default function Home() {
-  const [addPair, { data, loading, error }] = useMutation(ADD_PAIR_MUTATION);
-
   const [step, setState] = useState(1);
   const [question, setQuestion] = useState("");
-  const [suggestedQuestion, setSuggestedQuestion] = useState("");
   const [suggestedAnswer, setSuggestedAnswer] = useState("");
   const [customInstructions, setCustomInstructions] = useState("");
   const [finalAnswer, setFinalAnswer] = useState("");
@@ -40,39 +17,31 @@ export default function Home() {
 
   const fetchSimilarAnswers = async () => {
     setFetchingSimilar(true);
-    const emb = await createEmbedding(question);
-
-    const index = pinecone.index("questions");
-    const queryResponse = await index.query({
-      vector: emb,
-      topK: 1,
-      includeMetadata: true,
-    });
-
-    console.log(queryResponse);
-    console.log(queryResponse.matches[0].metadata.answer);
-    setSuggestedAnswer(queryResponse.matches[0].metadata.answer);
-    setSuggestedQuestion(queryResponse.matches[0].metadata.question);
+    // Implement logic to fetch similar answers
+    // Example: const response = await axios.post('/api/fetchSimilarAnswers', { question });
+    // setSuggestedAnswer(response.data.answer);
+    try {
+      const response = await axios.post("/api/pinecone/get", {
+        query: question,
+      });
+      if (response.data && response.data.length > 0) {
+        setSuggestedAnswer(response.data[0].answer); // Assuming the response contains an array of {id, answer}
+      } else {
+        setSuggestedAnswer("No similar answers found.");
+      }
+    } catch (error) {
+      console.error("Error fetching similar answers", error);
+      setSuggestedAnswer("Error fetching similar answers.");
+    }
     setFetchingSimilar(false);
   };
 
   const generateAnswer = async () => {
     try {
-      const prompt = `
-На основе представленных данных дайте прямой и конкретный ответ на вопрос пользователя, избегая лишних размышлений или деталей. В ответе учитывайте только ключевую информацию из тезисов куратора и схожей пары вопрос-ответ из Pinecone.
-
-1. Вопрос пользователя: "${question}"
-2. Тезисы от куратора: "${customInstructions}"
-3. Схожая пара вопрос-ответ из Pinecone: 
-   Вопрос:  "${suggestedQuestion}"
-   Ответ: "${suggestedAnswer}"
-`;
-
-      // Use this 'instructions' variable as your prompt for the completion endpoint.
+      const prompt = `${question}\n\nSuggested Answer: ${suggestedAnswer}\n\nCustom Instructions: ${customInstructions}\n\nAnswer:`;
       const response = await axios.post("/api/openai/generate-answer", {
         prompt,
       });
-      console.log(response);
       setFinalAnswer(response.data.answer);
     } catch (error) {
       console.error("Error generating answer", error);
@@ -84,25 +53,22 @@ export default function Home() {
     setSendingAnswer(true);
     // Use the utility function to add Q&A to Hasura and Pinecone
     if (saveAnswer) {
-      const id = generateUniqueId();
-      createQAEmbedding(question, finalAnswer, id);
-      await addPair({
-        variables: { question, answer: finalAnswer, id },
-      });
+      await axios.post("/api/hasura/addQA", { question, answer: finalAnswer });
     }
-    alert(`Answer sent ${saveAnswer ? "and saved." : ""} `);
+    alert("Answer sent: " + finalAnswer);
     setSendingAnswer(false);
   };
 
   return (
-    <div className="flex w-full justify-between p-4">
-      <div className="flex flex-col gap-y-8 divide-y divide-slate-300 max-w-xl">
+    <div className="flex p-4">
+      <div className="flex flex-col gap-y-8 divide-y divide-slate-300">
         {/* 1. Just question */}
         {step > 0 && (
           <div className="flex flex-col">
             <div className="flex gap-x-1">
-              <Input
+              <input
                 placeholder="What do you want to ask?"
+                className="py-1 px-3 rounded-full border border-gray-300 w-56"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
               />
@@ -133,11 +99,11 @@ export default function Home() {
               onChange={(e) => setCustomInstructions(e.target.value)}
             />
             <Button
-              loading={generatingAnswer || regeneratingAnswer}
+              loading={generatingAnswer}
               type={step === 2 ? "primary" : "subtle"}
-              onClick={async () => {
+              onClick={() => {
                 setGeneratingAnswer(true);
-                await generateAnswer();
+                generateAnswer();
                 setGeneratingAnswer(false);
                 setState(3);
               }}
@@ -153,10 +119,10 @@ export default function Home() {
             <div className="flex flex-col gap-y-1.5">
               <Button
                 type="secondary"
-                loading={generatingAnswer || regeneratingAnswer}
+                loading={regeneratingAnswer}
                 onClick={async () => {
                   setRegeneratingAnswer(true);
-                  await generateAnswer();
+                  generateAnswer();
                   setRegeneratingAnswer(false);
                 }}
               >
@@ -178,7 +144,62 @@ export default function Home() {
           </div>
         )}
       </div>
-      <ExistingQA />
     </div>
   );
 }
+
+const Box = ({ children }) => (
+  <div className="bg-gray-50 rounded-2xl flex flex-col border p-4">
+    {children}
+  </div>
+);
+
+const Button = ({ children, type, onClick, loading, size = "default" }) => {
+  let className = "";
+  let sizeClassName = "py-2 px-4";
+
+  if (type === "primary") {
+    className = "bg-blue-700 text-white";
+  }
+
+  if (type === "secondary") {
+    className = "bg-amber-300 text-gray-900";
+  }
+
+  if (type === "subtle") {
+    className = "bg-gray-50 text-gray-700 border-gray-300 border";
+  }
+
+  if (size === "sm") {
+    sizeClassName = "py-1 px-4";
+  }
+
+  return (
+    <button
+      className={`rounded-full ${sizeClassName} ${className} hover:opacity-80`}
+      onClick={onClick}
+      disabled={loading}
+    >
+      {loading ? "Loading..." : children}
+    </button>
+  );
+};
+
+const Checkbox = ({ label, value, onChange }) => (
+  <div className="flex items-center ml-0 cursor-pointer hover:opacity-90">
+    <input
+      type="checkbox"
+      checked={value}
+      onChange={onChange}
+      name="save-answer"
+      className="h-4 w-4 rounded border-gray-300 text-blue-500 cursor-pointer"
+    />
+    <label
+      className="ml-1.5 text-gray-700 text-sm cursor-pointer"
+      htmlFor="save-answer"
+      onClick={onChange}
+    >
+      {label}
+    </label>
+  </div>
+);
