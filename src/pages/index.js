@@ -21,7 +21,7 @@ const ADD_PAIR_MUTATION = gql`
   }
 `;
 
-export default function Home() {
+const HomePage = () => {
   const [addPair, { data, loading, error }] = useMutation(ADD_PAIR_MUTATION);
 
   const [step, setState] = useState(1);
@@ -181,4 +181,6 @@ export default function Home() {
       <ExistingQA />
     </div>
   );
-}
+};
+
+export default HomePage;

@@ -1,15 +1,11 @@
-import OpenAI from "openai";
-const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+import axios from "axios";
 
 export const createEmbedding = async (text) => {
-  const embedding = await openai.embeddings.create({
-    model: "text-embedding-ada-002",
+  const response = await axios.post("/api/openai/create-embeding", {
     input: text,
-    encoding_format: "float",
   });
+
+  const embedding = response.data.embedding;
 
   return embedding.data[0].embedding;
 };
